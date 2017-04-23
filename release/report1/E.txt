@@ -1,0 +1,21 @@
+課題E
+
+"strace /bin/cat /proc/meminfo"の結果は
+・catの実行結果が標準出力に
+・straceの分析結果が標準エラー出力に
+それぞれ出力される。
+
+
+だから、
+
+(1)catだけをファイルに出力
+strace /bin/cat /proc/meminfo > out
+
+(2)straceだけをファイルに出力
+strace /bin/cat /proc/meminfo 2> out
+
+(3)catとstrace両方を出力
+strace /bin/cat /proc/meminfo &> out  (同じファイルに)
+strace /bin/cat /proc/meminfo 1> out1 2> out2 (違うファイルに)
+
+とすればよい。
