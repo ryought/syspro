@@ -15,10 +15,11 @@ int main(int argc, char *argv[]){
   }
   
   int fd; 
-  int i;
-  int bytes;
-  int lines;
-  int words;
+  int i, k;
+  int bytes = 0;
+  int lines = 0;
+  int words = 1;
+  int END_WITH_SPACE = 0;
   char buf[512];
 
   fd = open(argv[1], O_RDONLY);
@@ -32,23 +33,34 @@ int main(int argc, char *argv[]){
     // bytes
     bytes += i;                 /* バイト数は読んだバイト数そのまま足す */
     
-    for (int k=0; k<i; k++) {
+    for (k=0; k<i; k++) {
       // lines
       if (buf[k]=='\n') {
+	//printf("%d\n", lines);
         lines += 1;
       }
     }
-    for (int k=0; k<i-1; k++) {
-      // words  文字の一つ前にあるスペースをカウント
-        if (isspace(buf[k]) && !isspace(buf[k+1])) {
-          // TODO 先頭のスペースが数えられてしまうよ
-          printf("found %c, %c\n", buf[k], buf[k+1]);
-          words += 1;
-        }
-    }
 
+    for (k=0; k<i-1; k++) {
+      if (k==0 && isspace(buf[k]) && END_WITH_SPACE) {
+	//printf("gapped\n");
+	words += 1;
+      }
+      // words  文字の一つ前にあるスペースをカウント
+      if (isspace(buf[k]) && !isspace(buf[k+1])) {
+        // TODO 先頭のスペースが数えられてしまう
+        //printf("found %c, %c\n", buf[k], buf[k+1]);
+        words += 1;
+      }
+    }
+    if (isspace(buf[i-1])) {
+      // 末尾にスペース
+      END_WITH_SPACE = 1;
+    } else {
+      END_WITH_SPACE = 0;
+    }
     
-    printf("%d\n", i);
+    //printf("%d\n", i);
   }
 
   if(i < 0){

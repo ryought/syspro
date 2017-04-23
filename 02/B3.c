@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -12,11 +13,13 @@ int main(int argc, char *argv[]){
     // not enough args
     return -1;
   }
+  struct timeval start, end;
   int fd0, fd1; 
   int i, j;
-  int BUFSIZE = 512;
+  int BUFSIZE = 8192;
   char buf[BUFSIZE];
   
+  gettimeofday(&start, NULL);
 
   fd0 = open(argv[1], O_RDONLY);
   if(fd0 < 0) {
@@ -45,7 +48,7 @@ int main(int argc, char *argv[]){
       // TODO ここの処理
       // memmove(buf+j, buf, i-j);
     }
-    printf("%d, %d\n", i, j);
+    //printf("%d, %d\n", i, j);
   }
 
   if(i < 0){
@@ -54,6 +57,12 @@ int main(int argc, char *argv[]){
   }
 
   close(fd0); close(fd1);
+
+  gettimeofday(&end, NULL);
+  printf("%ld %ld\n", start.tv_sec, start.tv_usec);
+  printf("%ld %ld\n", end.tv_sec, end.tv_usec);
+  printf("%ld\n", 
+    (end.tv_sec-start.tv_sec)*1000000 + (end.tv_usec-start.tv_usec));
 
   return 0;
 }
