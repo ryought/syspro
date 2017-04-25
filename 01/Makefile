@@ -11,4 +11,4 @@ c.o: c.c c.h
 	gcc -Wall -c c.c
 
 clean:
-	rm -f *.o
+	rm -f *.o kadai-a
