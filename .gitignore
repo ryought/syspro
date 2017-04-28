@@ -1,0 +1,5 @@
+# resume .pdfは無視
+resume/
+
+# tarはリリース
+*.tar.gz
