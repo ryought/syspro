@@ -3,3 +3,9 @@ resume/
 
 # tarはリリース
 *.tar.gz
+
+# macファイル
+.DS_Store
+
+# バイナリは消す
+a.out
