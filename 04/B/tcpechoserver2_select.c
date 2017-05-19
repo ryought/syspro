@@ -11,10 +11,6 @@
 #include <errno.h>
 #include <unistd.h>
 
-// スレッド数 = 同時接続数
-#define NSOCKET 5
-
-
 
 // sockfdに対してエコーバックする
 void str_echo(int sockfd) {

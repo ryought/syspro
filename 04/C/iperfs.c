@@ -29,19 +29,29 @@ void recvandcheck(int sockfd) {
   printf("str_echo\n");
   ssize_t n;
   char buf[1024];
+  int datasize = 0;
   int total = 0;
+
+  n = read(sockfd, &datasize, sizeof(int));
+  if(n>0){
+    printf("datasize:%d\n", datasize);
+    buf[0] = 'C';
+    write(sockfd, buf, 1);
+    printf("ready sent\n");
+  }
+  
  again:
   while((n = read(sockfd, buf, 1024)) > 0) {
-    printf("received %zd(total %d)\n", n, total);
     total = total + n;
-    if(total>DATASIZE)
+    printf("received %zd(total %d)\n", n, total);
+    if(total>=datasize)
       break;
   }
   if(n < 0 && errno == EINTR)
     goto again;
   else if (n < 0)
     printf("read error");
-  if(total > DATASIZE){
+  if(total >= datasize){
     printf("read alldata\n");
     buf[0] = 'C';
     write(sockfd, buf, 1);

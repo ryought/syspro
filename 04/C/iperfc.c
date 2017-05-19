@@ -25,11 +25,9 @@ void client(FILE *fp, int sockfd) {
 
 
 int main(int argc, char* argv[]) {
-  if(argc != 3){
-     printf("usage: iperfc (host IPv4) (port number)\n");
+  if(argc != 4){
+     printf("usage: iperfc (host IPv4) (port number) (datasize)\n");
     return -1;
-  }else{
-    printf("host:%s, port:%s\n", argv[1], argv[2]);
   }
   
   int s;
@@ -47,37 +45,50 @@ int main(int argc, char* argv[]) {
 
   //データの準備
   char send[1024], recv[1025];
-  for(int k=0; k<1023; k++){
+  for(int k=0; k<1024; k++){
     send[k] = rand()%92+33; //アスキーコードの文字の範囲の乱数を発生
   }
   
   int n;
   int i;
-  int rep = 1000;  //繰り返し回数
+  int datasize = atoi(argv[3]);  // 送信データ数
+
+  // まず送信データ数を送る
+  write(s, &datasize, sizeof(datasize));
+  // その確認
+  n = read(s, recv, 1024);
+  recv[n] = '\0';
+  if(n > 0){
+    if(recv[n-1]!='C'){
+      printf("fail\n");
+      return -1;
+    }
+  }
+
+
+  // 確認取れたら送信作業に移る
 
   struct timeval start, end;
   gettimeofday(&start, NULL);
 
   // 重いデータの送信
-  for(i = 0; i < rep; i++){
+  for(i = 0; i < (datasize/1024)+1; i++){
     write(s, send, strlen(send));
   }
-  printf("main send\n");
   
   // 終了のエコーバックを待つ
   n = read(s, recv, 1024);
-  printf("read %d\n", n);
   recv[n] = '\0';
-  printf("%s\n", recv);
+  
   if(n > 0){
     if(recv[n-1]!='C'){
       printf("fail\n");
+      return -1;
     }
   }
   
   gettimeofday(&end, NULL);
 
-  int datasize = rep * strlen(send);
   int time = (end.tv_sec-start.tv_sec)*1000000 + (end.tv_usec-start.tv_usec);
   int throughput = datasize * 8 / time;
 
