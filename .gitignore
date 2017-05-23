@@ -1,6 +1,9 @@
 # resume .pdfは無視
 resume/
 
+# テストファイルも消す
+01/coreutils-8.9/
+
 # tarはリリース
 *.tar.gz
 
