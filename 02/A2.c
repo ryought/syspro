@@ -19,7 +19,7 @@ int main(){
   gettimeofday(&end, NULL);
   
   printf("%ld\n", 
-    (end.tv_sec-start.tv_sec)*1000 + (end.tv_usec-start.tv_usec));
+    (end.tv_sec-start.tv_sec)*1000000 + (end.tv_usec-start.tv_usec));
   
   
   
