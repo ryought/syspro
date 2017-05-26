@@ -5,15 +5,19 @@
 #include <fcntl.h>
 #include <string.h>
 #include "parser/parse.h" // パーサ
+
+
  
 int main(int argc, char* argv[], char *envp[]) {
   pid_t pid;
+  int pgid, pgid2;
   char s[LINELEN];
   job *curr_job;
   int pfd[2] = {3, 4};  // パイプ
   int fd[2] = {0, 1};  // fd[0]が入力、fd[1]が出力 デフォルトはstdin, stdoutに設定
+  int gfd[2];
   char program_name[256];
-
+  
   // PATHの取得処理
   // TODO ここを環境変数envpから取り出す処理
   char* path[] = {"/usr/bin/", "/bin/"};
@@ -21,7 +25,7 @@ int main(int argc, char* argv[], char *envp[]) {
   while(get_line(s, LINELEN)){
     curr_job = parse_line(s);
     process *process = curr_job->process_list;
-    
+    pgid = 0;  // 初期化
     
     while(process != NULL){
       // builtin 判定
@@ -59,23 +63,38 @@ int main(int argc, char* argv[], char *envp[]) {
         fd[1] = 1;  // stdout
       }
 
+      // 親子間の通信用パイプ
+      pipe(gfd);
+
       // process作成
       if((pid=fork()) == 0){
         // child側
-        // DEBUG
-        //printf("%d %d %d %d\n", fd[0], fd[1], pfd[0], pfd[1]);
+        
+        if(pgid == 0){
+          setpgid(pid, pid); // 最初のプロセス
+          pgid = getpgid(pid);
+        } else {
+          setpgid(pid, pgid);  // 次以降
+        }
+        write(gfd[1], &pgid, sizeof(pgid));
+        close(gfd[1]);
         
         dup2(fd[0], 0);
         dup2(fd[1], 1);
-
         execve(process->program_name, process->argument_list, envp);
+        
       } else {
         // parent
+        
         // fdのclose処理
         if(fd[0] != 0)  close(fd[0]); // 読み込みはしないので閉じる
         if(fd[1] != 1)  close(fd[1]);  // 書き込み先にEOF送る
         int status;
         waitpid(pid, &status, WUNTRACED); // 子供は終了時、親にstatusを返さないといけない。それを待ち受ける。
+
+        // child pgidを取得
+        int n = read(gfd[0], &pgid, sizeof(pgid));
+        close(gfd[0]);
       }
       process = process->next; // 更新処理
     }
