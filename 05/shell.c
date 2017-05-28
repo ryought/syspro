@@ -6,6 +6,39 @@
 #include <string.h>
 #include "parser/parse.h" // パーサ
 
+// 適当な入力元を返してくれる
+int fd0(process *process, int fd[2], int pfd[2]) {
+  int x;
+  // fd[0] 入力元を変える
+  if(process->input_redirection) // インプットファイルがあった時
+    x = open(process->input_redirection, O_RDONLY);
+  else if (fd[1] == pfd[1]) // 一つ前でパイプ使ってる時
+    x = pfd[0];  // 読み出し側のパイプを使う
+  else
+    x = 0; // stdin
+  return x;
+}
+
+// 適当な出力先を返してくれる
+int fd1(process *process, int fd[2], int pfd[2]) {
+  int x;
+  // fd[1] 出力先を変える設定
+  if(process->output_redirection){
+    if(process->output_option == TRUNC){
+      // 作るモード
+      x = open(process->output_redirection, O_WRONLY|O_CREAT, 0666);
+    }else if(process->output_option == APPEND){
+      // 追記モード
+      x = open(process->output_redirection, O_RDWR|O_CREAT|O_APPEND, 0666);
+    }
+  } else if (process->next != NULL){
+    // 次がいる時はパイプに接続
+    x = pfd[1];
+  } else {
+    x = 1;  // stdout
+  }
+  return x;
+}
 
  
 int main(int argc, char* argv[], char *envp[]) {
@@ -49,55 +82,32 @@ int main(int argc, char* argv[], char *envp[]) {
       
       while(process != NULL){
         // builtin 判定
-        if(strcmp(process->program_name, "exit") == 0){
+        if(!strcmp(process->program_name, "exit"))
           return 0;
-        }
-      
-        // fd[0] 入力元を変える
-        if(process->input_redirection) {
-          // インプットファイルがあった時
-          fd[0] = open(process->input_redirection, O_RDONLY);
-        } else if (fd[1] == pfd[1]) {
-          // 一つ前でパイプ使ってる時
-          fd[0] = pfd[0];  // 読み出し側のパイプを使う
-        } else {
-          fd[0] = 0; // stdin
-        }
 
+        fd[0] = fd0(process, fd, pfd);
         // 新しいパイプ作る
         pipe(pfd);
 
-        // fd[1] 出力先を変える設定
-        if(process->output_redirection){
-          if(process->output_option == TRUNC){
-            // 作るモード
-            fd[1] = open(process->output_redirection,
-                         O_WRONLY|O_CREAT, 0666);
-          }else if(process->output_option == APPEND){
-            // 追記モード
-            fd[1] = open(process->output_redirection,
-                         O_RDWR|O_CREAT|O_APPEND, 0666);
-          }
-        } else if (process->next != NULL){
-          // 次がいる時はパイプに接続
-          fd[1] = pfd[1];
-        } else {
-          fd[1] = 1;  // stdout
-        }
-
+        fd[1] = fd1(process, fd, pfd);
         // 親子間の通信用パイプ
         pipe(gfd);
 
         // process作成
         if((pid=fork()) == 0){
           // child側
+          printf("(child) pid:%d pgid:%d tcpgid:%d\n",getpid(), getpgid(0), tcgetpgrp(0));
 
           // pgidの設定 
           if(pgid == 0){
+            //pgid = getpid;
             setpgid(pid, pid); // 最初のプロセス
             pgid = getpgid(pid);
           } else {
-            setpgid(pid, pgid);  // 次以降
+            printf("hoge");
+            if(setpgid(pid, pgid) != 0)  // 次以降
+              perror(0);
+            printf("%d\n", getpgid(0));
           }
           
           printf("(child) pgid:%d tcpgid:%d\n", getpgid(0), tcgetpgrp(0));
@@ -142,6 +152,7 @@ int main(int argc, char* argv[], char *envp[]) {
           // child pgidを取得
           read(gfd[0], &pgid, sizeof(pgid));
           close(gfd[0]);
+          printf("%d\n", pgid);
 
 
           tcsetpgrp(0, getpgid(0));
