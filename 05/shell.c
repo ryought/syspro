@@ -46,6 +46,9 @@ int run_process(process *process, int fd[2]) {
   return pgid;
 }
 
+void pid_log(char *message) {
+  printf("(%s) pid:%d pgid:%d tcpgid:%d\n", message, getpid(), getpgid(0), tcgetpgrp(0));
+}
  
 int main(int argc, char* argv[], char *envp[]) {
   pid_t pid;
@@ -74,7 +77,6 @@ int main(int argc, char* argv[], char *envp[]) {
 
   
   while(get_line(s, LINELEN)){
-    printf("ya");
     curr_job = parse_line(s);
 
     if(curr_job == NULL)
@@ -84,12 +86,12 @@ int main(int argc, char* argv[], char *envp[]) {
     if(curr_job->mode == FOREGROUND) {
       // foreground実行
 
-          /* signal (SIGINT, SIG_DFL); */
-          /* signal (SIGQUIT, SIG_DFL); */
-          /* signal (SIGTSTP, SIG_DFL); */
-          /* signal (SIGTTIN, SIG_DFL); */
-          /* signal (SIGTTOU, SIG_DFL); */
-          /* signal (SIGCHLD, SIG_DFL); */
+      signal (SIGINT, SIG_DFL);
+      signal (SIGQUIT, SIG_DFL);
+      signal (SIGTSTP, SIG_DFL);
+      //signal (SIGTTIN, SIG_DFL);
+      //signal (SIGTTOU, SIG_DFL);
+      signal (SIGCHLD, SIG_DFL);
 
       process *process = curr_job->process_list;
 
@@ -100,7 +102,7 @@ int main(int argc, char* argv[], char *envp[]) {
       pid_t watcher;
       if((watcher = fork()) == 0) {
         // 子供
-        printf("(job watcher) pid:%d pgid:%d tcpgid:%d\n",getpid(), getpgid(0), tcgetpgrp(0));
+        pid_log("job watcher");
         // 各プロセスにforkして、返りを待つ。全部帰ってきたら死ぬ
 
         // job単位のpgidを作る。リーダーはこのwatcherプロセス
@@ -119,13 +121,13 @@ int main(int argc, char* argv[], char *envp[]) {
           // 各プロセスごとのfork
           if((pid = fork()) == 0){
             // 子供 それぞれのプロセスに変わる
-            printf("(process) pid:%d pgid:%d tcpgid:%d\n",getpid(), getpgid(0), tcgetpgrp(0));
+            pid_log("process");
             dup2(fd[0], 0);
             dup2(fd[1], 1);
             execve(process->program_name, process->argument_list, envp);
           } else {
             // 親 プロセスの終了をちゃんと待つ(同期動作)
-            printf("(job watcher) pid:%d pgid:%d tcpgid:%d\n",getpid(), getpgid(0), tcgetpgrp(0));
+            pid_log("job watcher with process run");
             // fdのclose処理
             if(fd[0] != 0)  close(fd[0]); // 読み込みはしないので閉じる
             if(fd[1] != 1)  close(fd[1]);  // 書き込み先にEOF送る
@@ -140,11 +142,11 @@ int main(int argc, char* argv[], char *envp[]) {
         // パイプ 使わないのがあるかもしれないので消しておく
         close(pfd[0]);
         close(pfd[1]);
-        printf("(job watcher will exit) pid:%d pgid:%d tcpgid:%d\n",getpid(), getpgid(0), tcgetpgrp(0));
+        pid_log("job watcher will exit");
         return 0;
       } else {
         // 本体
-        printf("(shell) pid:%d pgid:%d tcpgid:%d\n",getpid(), getpgid(0), tcgetpgrp(0));
+        pid_log("shell");
         // すぐに戻る。 ハンドラを設定して、子供のpidに反応するようにする。
         int status2;
         waitpid(watcher, &status2, WUNTRACED);
@@ -155,6 +157,75 @@ int main(int argc, char* argv[], char *envp[]) {
     } else {
       // background実行  非同期で実行する
       printf("background\n");
+
+
+      signal (SIGINT, SIG_DFL);
+      signal (SIGQUIT, SIG_DFL);
+      signal (SIGTSTP, SIG_DFL);
+      //signal (SIGTTIN, SIG_DFL);
+      //signal (SIGTTOU, SIG_DFL);
+      signal (SIGCHLD, SIG_DFL);
+      process *process = curr_job->process_list;
+
+      // builtin 判定
+      if(!strcmp(process->program_name, "exit"))
+        return 0;
+      
+      pid_t watcher;
+      if((watcher = fork()) == 0) {
+        // 子供
+        pid_log("job watcher");
+        // 各プロセスにforkして、返りを待つ。全部帰ってきたら死ぬ
+
+        // job単位のpgidを作る。リーダーはこのwatcherプロセス
+        // foregroundにする。
+        setpgid(watcher, watcher);
+        //tcsetpgrp(0, getpgid(0));
+
+        int fd[2] = {0, 1};
+        int pfd[2] = {3, 4};
+
+        while(process != NULL){
+          fd[0] = fd0(process, fd, pfd); // processの入力
+          pipe(pfd); // pipeで繋がれた前後process間通信用
+          fd[1] = fd1(process, fd, pfd); // processの出力先
+          pid_t pid;
+          // 各プロセスごとのfork
+          if((pid = fork()) == 0){
+            // 子供 それぞれのプロセスに変わる
+            pid_log("process");
+            dup2(fd[0], 0);
+            dup2(fd[1], 1);
+            execve(process->program_name, process->argument_list, envp);
+          } else {
+            // 親 プロセスの終了をちゃんと待つ(同期動作)
+            pid_log("job watcher with process run");
+            // fdのclose処理
+            if(fd[0] != 0)  close(fd[0]); // 読み込みはしないので閉じる
+            if(fd[1] != 1)  close(fd[1]);  // 書き込み先にEOF送る
+
+            // 子供の終了を待つ(同期)。一つのprocessが終了したら、次のプロセスを起動
+            int status;
+            waitpid(pid, &status, WUNTRACED);
+          }
+          // 更新処理
+          process = process->next;
+        }
+        // パイプ 使わないのがあるかもしれないので消しておく
+        close(pfd[0]);
+        close(pfd[1]);
+        pid_log("job watcher will exit");
+        return 0;
+      } else {
+        // 本体
+        pid_log("shell");
+        // すぐに戻る。 ハンドラを設定して、子供のpidに反応するようにする。
+        int status2;
+        waitpid(watcher, &status2, WUNTRACED);
+        // 戻ってきたらshellをforegroundにもどす。
+        tcsetpgrp(0, getpgid(0));
+      }
+
       
     }
   }
