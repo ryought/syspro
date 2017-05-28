@@ -10,7 +10,7 @@
  
 int main(int argc, char* argv[], char *envp[]) {
   pid_t pid;
-  int pgid;
+  int pgid, sh_pgid;
   char s[LINELEN];
   job *curr_job;
   int pfd[2] = {3, 4};  // パイプ
@@ -21,10 +21,22 @@ int main(int argc, char* argv[], char *envp[]) {
   // PATHの取得処理
   // TODO ここを環境変数envpから取り出す処理
   char* path[] = {"/usr/bin/", "/bin/"};
+
+  signal (SIGINT, SIG_IGN);
+  signal (SIGQUIT, SIG_IGN);
+  signal (SIGTSTP, SIG_IGN);
+  signal (SIGTTIN, SIG_IGN);
+  signal (SIGTTOU, SIG_IGN);
+  signal (SIGCHLD, SIG_IGN);
+
+
+  setpgid(0, 0);
+  tcsetpgrp(0, getpgid(0));
   
   while(get_line(s, LINELEN)){
     curr_job = parse_line(s);
 
+    // jobの実行モードによって切り分ける
     if(curr_job->mode == FOREGROUND) {
       // foreground実行
       process *process = curr_job->process_list;
@@ -47,7 +59,7 @@ int main(int argc, char* argv[], char *envp[]) {
           fd[0] = 0; // stdin
         }
 
-        // 新しいパイプ作る      
+        // 新しいパイプ作る
         pipe(pfd);
 
         // fd[1] 出力先を変える設定
@@ -74,16 +86,27 @@ int main(int argc, char* argv[], char *envp[]) {
         // process作成
         if((pid=fork()) == 0){
           // child側
-        
+
+          // pgidの設定 
           if(pgid == 0){
             setpgid(pid, pid); // 最初のプロセス
             pgid = getpgid(pid);
           } else {
             setpgid(pid, pgid);  // 次以降
           }
+          
+          printf("(child) pgid:%d tcpgid:%d\n", getpgid(0), tcgetpgrp(0));
 
-          printf("tcset %d\n", tcgetpgrp(0));
-          //tcsetpgrp(0, getpid());
+          tcsetpgrp(0, getpgid(0));
+
+          printf("(child) pgid:%d tcpgid:%d\n", getpgid(0), tcgetpgrp(0));
+
+          signal (SIGINT, SIG_DFL);
+          signal (SIGQUIT, SIG_DFL);
+          signal (SIGTSTP, SIG_DFL);
+          signal (SIGTTIN, SIG_DFL);
+          signal (SIGTTOU, SIG_DFL);
+          signal (SIGCHLD, SIG_DFL);
           
           /* if (tcsetpgrp(STDIN_FILENO, getpgrp()) == -1) { */
           /*   printf("Could not set PGID.n"); */
@@ -103,21 +126,28 @@ int main(int argc, char* argv[], char *envp[]) {
         
         } else {
           // parent
-          printf("p\n");
-          tcsetpgrp(STDIN_FILENO, getpgid(pid));
-          printf("passed\n");
+
+          printf("(parent) pgid:%d tcpgid:%d\n", getpgid(0), tcgetpgrp(0));
+          
+          
+
+          
           // fdのclose処理
           if(fd[0] != 0)  close(fd[0]); // 読み込みはしないので閉じる
           if(fd[1] != 1)  close(fd[1]);  // 書き込み先にEOF送る
+
           int status;
           waitpid(pid, &status, WUNTRACED); // 子供は終了時、親にstatusを返さないといけない。それを待ち受ける。
 
-          tcsetpgrp(STDIN_FILENO, getpgrp());
-          printf("parent\n");
+          //tcsetpgrp(STDIN_FILENO, getpgrp());
+          //printf("parent\n");
           
           // child pgidを取得
           read(gfd[0], &pgid, sizeof(pgid));
           close(gfd[0]);
+
+
+          tcsetpgrp(0, getpgid(0));
         }
         process = process->next; // 更新処理
       }
