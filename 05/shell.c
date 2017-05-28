@@ -32,16 +32,21 @@ int main(int argc, char* argv[], char *envp[]) {
 
   setpgid(0, 0);
   tcsetpgrp(0, getpgid(0));
+
   
   while(get_line(s, LINELEN)){
     curr_job = parse_line(s);
 
+    if(curr_job == NULL)
+      continue;
+    
     // jobの実行モードによって切り分ける
     if(curr_job->mode == FOREGROUND) {
       // foreground実行
       process *process = curr_job->process_list;
       pgid = 0;  // 初期化
-    
+
+      
       while(process != NULL){
         // builtin 判定
         if(strcmp(process->program_name, "exit") == 0){
@@ -108,12 +113,6 @@ int main(int argc, char* argv[], char *envp[]) {
           signal (SIGTTOU, SIG_DFL);
           signal (SIGCHLD, SIG_DFL);
           
-          /* if (tcsetpgrp(STDIN_FILENO, getpgrp()) == -1) { */
-          /*   printf("Could not set PGID.n"); */
-          /*   return(-1); */
-          /* } */
-          
-          /* printf("tcset %d\n", tcgetpgrp(0)); */
           
 
           // 親側にgroupidを通知
@@ -139,8 +138,6 @@ int main(int argc, char* argv[], char *envp[]) {
           int status;
           waitpid(pid, &status, WUNTRACED); // 子供は終了時、親にstatusを返さないといけない。それを待ち受ける。
 
-          //tcsetpgrp(STDIN_FILENO, getpgrp());
-          //printf("parent\n");
           
           // child pgidを取得
           read(gfd[0], &pgid, sizeof(pgid));
@@ -151,9 +148,9 @@ int main(int argc, char* argv[], char *envp[]) {
         }
         process = process->next; // 更新処理
       }
+
       close(pfd[0]);
-      close(pfd[1]);
-      
+      close(pfd[1]); 
       
     } else {
       // background実行  非同期で実行する
