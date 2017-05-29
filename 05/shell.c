@@ -51,6 +51,11 @@ void handler(int signal) {
   //printf("%d, %d, %d, %d\n", pid, WIFEXITED(status), WIFSIGNALED(status), WIFSTOPPED(status));
 }
 
+// signalハンドラ
+void stop(int signal) {
+  kill(0, SIGSTOP);
+}
+
 int run_process(process *process, int fd[2]) {
   int pgid;
   
@@ -58,11 +63,11 @@ int run_process(process *process, int fd[2]) {
 }
 
 void pid_log(char *message) {
-  //printf("(%s) pid:%d pgid:%d tcpgid:%d\n", message, getpid(), getpgid(0), tcgetpgrp(0));
+  printf("(%s) pid:%d pgid:%d tcpgid:%d\n", message, getpid(), getpgid(0), tcgetpgrp(0));
 }
  
 int main(int argc, char* argv[], char *envp[]) {
-  pid_t pid;
+  pid_t pid, watcher;
   int pgid, sh_pgid;
   char s[LINELEN];
   job *curr_job;
@@ -75,12 +80,16 @@ int main(int argc, char* argv[], char *envp[]) {
   // TODO ここを環境変数envpから取り出す処理
   char* path[] = {"/usr/bin/", "/bin/"};
 
-  signal (SIGINT, SIG_IGN);
-  signal (SIGQUIT, SIG_IGN);
-  signal (SIGTSTP, SIG_IGN);
-  signal (SIGTTIN, SIG_IGN);
+
+  // shell側のシグナル設定
+  signal (SIGINT, SIG_IGN);   // C-c
+  //signal (SIGQUIT, SIG_IGN);  
+  signal (SIGTSTP, SIG_IGN);  // C-z
+  signal (SIGTTIN, SIG_IGN); // 子供プロセスとの関係
   signal (SIGTTOU, SIG_IGN);
   signal (SIGCHLD, SIG_IGN);
+
+  
 
   setpgid(0, 0);
   tcsetpgrp(0, getpgid(0));
@@ -99,20 +108,39 @@ int main(int argc, char* argv[], char *envp[]) {
     // builtin 判定
     if(!strcmp(process->program_name, "exit"))
       return 0;
-      
-    pid_t watcher;
+
+    if(!strcmp(process->program_name, "bg")){
+      if(watcher!=0) {
+        printf("background process exist %d\n", watcher);
+        tcsetpgrp(0, getpgid(watcher));
+        kill(-1*watcher, SIGCONT);
+      }else{
+        printf("not exist\n");
+      }
+    }
+    
+    if(!strcmp(process->program_name, "fg"))
+      printf("hi");
+
+    
     if((watcher = fork()) == 0) {
       // 子供
       pid_log("job watcher");
       // 各プロセスにforkして、返りを待つ。全部帰ってきたら死ぬ
 
       // シグナルの設定を戻す
+      //ctrl-c 
       signal (SIGINT, SIG_DFL);
-      signal (SIGQUIT, SIG_DFL);
-      signal (SIGTSTP, SIG_DFL);
+      //signal (SIGQUIT, SIG_DFL);
       //signal (SIGTTIN, SIG_DFL);
       //signal (SIGTTOU, SIG_DFL);
       signal (SIGCHLD, SIG_DFL);
+      
+      // 一時停止・再開シグナル
+      signal (SIGTSTP, SIG_DFL);
+      signal (SIGCONT, SIG_DFL);
+
+      
 
       // job単位のpgidを作る。リーダーはこのwatcherプロセス
       setpgid(watcher, watcher);
@@ -129,7 +157,6 @@ int main(int argc, char* argv[], char *envp[]) {
         fd[0] = fd0(process, fd, pfd); // processの入力
         pipe(pfd); // pipeで繋がれた前後process間通信用
         fd[1] = fd1(process, fd, pfd); // processの出力先
-        pid_t pid;
         // 各プロセスごとのfork
         if((pid = fork()) == 0){
           // 子供 それぞれのプロセスに変わる
