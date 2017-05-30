@@ -7,6 +7,9 @@
 #include <signal.h>
 #include "parser/parse.h" // パーサ
 
+// global pgid保存用 ハンドラの中でアクセスする
+volatile int running_pgid;
+
 // 適当な入力元を返してくれる
 int fd0(process *process, int fd[2], int pfd[2]) {
   int x;
@@ -53,7 +56,9 @@ void handler(int signal) {
 
 // signalハンドラ
 void stop(int signal) {
-  kill(0, SIGSTOP);
+  // 走ってるやつを止める
+  printf("stop\n");
+  kill(-running_pgid, SIGSTOP);
 }
 
 int run_process(process *process, int fd[2]) {
@@ -110,12 +115,12 @@ int main(int argc, char* argv[], char *envp[]) {
       return 0;
 
     if(!strcmp(process->program_name, "bg")){
-      if(watcher!=0) {
-        printf("background process exist %d\n", watcher);
-        tcsetpgrp(0, getpgid(watcher));
-        kill(-1*watcher, SIGCONT);
+      if(running_pgid!=0) {
+        printf("(shell) background process exist %d\n", running_pgid);
+        tcsetpgrp(0, getpgid(running_pgid));
+        kill(-running_pgid, SIGCONT);
       }else{
-        printf("not exist\n");
+        printf("(shell) not exist\n");
       }
     }
     
@@ -190,6 +195,8 @@ int main(int argc, char* argv[], char *envp[]) {
       if(curr_job->mode == FOREGROUND) {
         // foreground実行の時
         signal (SIGCHLD, SIG_DFL);
+        // runningを保存 bgで復帰する用
+        running_pgid = watcher;
         // watcherの終了(=jobの終了)を完全に待機
         waitpid(watcher, &watcher_status, WUNTRACED);
         // 戻ってきたらbackgroundになってるshellをforegroundにもどす。

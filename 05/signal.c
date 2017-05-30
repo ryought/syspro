@@ -13,17 +13,25 @@ void handler(int signal) {
   printf("called!!\n");
 }
 
+void stopped(int signal) {
+  printf("child stopped\n");
+}
+
 
 int main() {
   pid_t pid;
 
-  struct sigaction si;
+  struct sigaction si, si2;
   si.sa_handler = handler; // 自作ハンドラへのポインタ
   // SIG_DFL, SIG_IGN は それぞれデフォルト、無視ハンドラへのポインタ
   si.sa_flags = 0; // フラグはなし
 
   sigaction(SIGCONT, &si, NULL); // old_siは指定なし
 
+
+  si2.sa_handler = stopped;
+  si2.sa_flags = 0;
+  sigaction(SIGCHLD, &si2, NULL);
   
   
   if((pid = fork()) == 0){
