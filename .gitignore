@@ -13,3 +13,4 @@ kernel/
 
 # バイナリは消す
 a.out
+*.out
