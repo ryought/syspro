@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
-#define SIZE 50
+#define SIZE 10
 
 typedef struct bb * BBuffer;
 struct bb {
