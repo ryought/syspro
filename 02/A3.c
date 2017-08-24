@@ -9,7 +9,6 @@
 
 int main(){
   struct timeval start, end;
-  pid_t pid;
   int i;
 
   gettimeofday(&start, NULL);

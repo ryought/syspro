@@ -30,7 +30,7 @@ int main(){
   }
 
   gettimeofday(&end, NULL);
-  
+  printf("%d\n", pid);
   printf("%ld\n", 
     (end.tv_sec-start.tv_sec)*1000 + (end.tv_usec-start.tv_usec));
   
