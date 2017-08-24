@@ -1,0 +1,136 @@
+diff --git a/apic.c b/apic.c
+index a10e13b..f4277e4 100644
+--- a/apic.c
++++ b/apic.c
+@@ -187,7 +187,8 @@ void apic_initialize_ap() {
+ 
+ // APIC IDを返す
+ uint8_t apic_get_id() {
+-  return 0; // ダミー実装
++  uint32_t addr = manager.lapic_base_addr + 0x20;
++  return *((uint32_t *)(addr+3));
+ }
+ 
+ // ハードウェアスレッド数を返す
+diff --git a/common.h b/common.h
+index ed79157..7e854f6 100644
+--- a/common.h
++++ b/common.h
+@@ -33,6 +33,8 @@ enum ReturnCode {
+ 
+ #define NULL ((void *)0)
+ 
++uint8_t font[128][8];
++
+ static inline void outb(int pin, uint8_t data) {
+   __asm__ volatile("outb %%al, %%dx"::"d"(pin), "a"(data));
+ }
+diff --git a/framebuffer.c b/framebuffer.c
+index 2be7263..3c8d86e 100644
+--- a/framebuffer.c
++++ b/framebuffer.c
+@@ -21,6 +21,30 @@ void framebuffer_init(struct multiboot_tag_framebuffer_common *tag) {
+ // char文字の描画
+ static void framebuffer_putc(char c) {
+   // TODO
++  unsigned char *p = (unsigned char*)framebuffer_tag->framebuffer_addr;
++  uint32_t width = framebuffer_tag->framebuffer_width;
++  //uint32_t height = framebuffer_tag->framebuffer_height;
++  uint32_t depth = framebuffer_tag->framebuffer_bpp / 8;
++
++  static int x, y;
++
++  for (int i=0; i<8; i++) {
++    for (int j=0; j<8; j++) {
++      int pos = (y+i)*depth*width + (x+j)*depth;
++      for (int b=0; b<depth; b++) {
++        if (font[c][i] >> (7-j) & 1) {
++          p[pos+b] = 0xff;
++        } else {
++          p[pos+b] = 0x00;
++        }
++      }
++    }
++  }
++  x += 8;
++  if(x >= width || c == '\n'){
++    x = 0;
++    y += 8;
++  }
+ }
+ 
+ // https://github.com/swetland/xv6 より引用
+@@ -81,6 +105,8 @@ framebuffer_printint(int xx, int base, int sign)
+     framebuffer_putc(buf[i]);
+ }
+ 
++volatile int lock = 0;
++
+ void
+ framebuffer_printf(char *fmt, ...)
+ {
+@@ -93,6 +119,8 @@ framebuffer_printf(char *fmt, ...)
+   if (fmt == 0)
+     panic();
+ 
++  while(__sync_lock_test_and_set(&lock, 1));
++
+   for(i = 0; (c = fmt[i] & 0xff) != 0; i++){
+     if(c != '%'){
+       framebuffer_putc(c);
+@@ -127,4 +155,5 @@ framebuffer_printf(char *fmt, ...)
+       break;
+     }
+   }
++  __sync_lock_release(&lock);
+ }
+diff --git a/main.c b/main.c
+index 44c07a8..80c0780 100644
+--- a/main.c
++++ b/main.c
+@@ -18,6 +18,18 @@ int status = 0;
+ 
+ extern uint64_t pt1[256];
+ 
++void fault_handler(struct regs *rs) {
++  pt1[0] = PTE_PRESENT_BIT | PTE_WRITE_BIT | PTE_USER_BIT | (0x1000000 + 4096);
++}
++
++void ipi_handler(struct regs *rs) {
++}
++
++void ipi_recv_handler(struct regs *rs) {
++  uint64_t m = 0x1000100; // invalidateするアドレス
++  __asm__ volatile("invlpg (%0)"::"b"(m):"memory");
++}
++
+ void cmain() {
+   struct rsdp_descriptor *rsdp = multiboot_get_rsdp_desc();
+   if (rsdp == NULL) {
+@@ -46,6 +58,7 @@ void cmain() {
+   apic_enable_lapic();
+ 
+   // TODO 課題A: ここでページフォルトハンドラを登録する事
++  idt_register_callback(14, fault_handler);
+   
+   int *ptr = (int *)((uint64_t)0x4000000000);
+ 
+@@ -64,6 +77,10 @@ void cmain() {
+   framebuffer_printf("<%d:%d>", apic_get_id(), *ptr);
+ 
+   // TODO 課題B: TLB shootdown通知コードをここに書く事
++  for(int i=1; i<apic_get_cpu_nums(); i++) {
++    idt_register_callback(32+apic_get_id(), ipi_handler);
++    apic_send_ipi(apic_get_id()+i, 32+apic_get_id());
++  }
+ 
+   __sync_fetch_and_add(&status, 1);
+ 
+@@ -80,6 +97,7 @@ void cmain_for_ap() {
+   idt_init_for_each_proc();
+ 
+   // TODO 課題B: ここでTLB shootdown受信ハンドラを登録する事
++  idt_register_callback(32+apic_get_id(), ipi_recv_handler);
+ 
+   int *ptr = (int *)((uint64_t)0x4000000000);
+ 

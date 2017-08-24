@@ -1,0 +1,111 @@
+diff --git a/boot.S b/boot.S
+index 78a9227..2ccd8ad 100644
+--- a/boot.S
++++ b/boot.S
+@@ -68,7 +68,23 @@ entry:
+   movl $(initial_stack_buffer + 0x1000), %esp
+ 
+   // TODO: cpuid命令の存在チェック
++  // pushfd 
++  // EFLAGS ID(bit 21)がcpuid命令の存在をあらわす
++  pushfl // EFLAGSを取得
++  popl %eax // eaxにflagsを入れる
++  andl $(1<<21), %eax // 21番目を取得
++  testl %eax, %eax  // チェックする
++  je nocpuid  // もし持ってなければ飛ぶ
++
+   // TODO: IA-32eモードの存在チェック
++  // vol3 3.3.1
++  //  On processors that support Intel 64 architecture (CPUID.80000001H:EDX[29] = 1) 
++  // と書いてあるので、Bit 29: Intel® 64 Architecture available if 1.を見れば良い。
++  movl $0x80000001, %eax  // set EAX initial value
++  cpuid // execute cpuid
++  testl $(1<<29), %edx  // edx bit 29 == 1だったらOK、ダメだったらhlt
++  jz noia32e
++  
+ 
+   // PML4Tをセット
+ 	movl $pml4t, %edi
+@@ -81,7 +97,7 @@ entry:
+   // PML4Tの第一エントリはPDPT1を指す
+   movl $pml4t, %edi
+   movl $pdpt1, %eax
+-  orl  $(PML4E_PRESENT_BIT | PML4E_WRITE_BIT | PML4E_USER_BIT), %eax
++  orl  $(PML4E_PRESENT_BIT | PML4E_WRITE_BIT | PML4E_USER_BIT), %eax // フラグたてる
+   movl %eax, (%edi)
+   movl $0, 4(%edi)
+ 
+@@ -91,6 +107,26 @@ entry:
+   orl  $(PDPTE_PRESENT_BIT | PDPTE_WRITE_BIT | PDPTE_USER_BIT | PDPTE_1GPAGE_BIT), %eax
+   movl %eax, (%edi)
+   movl $0, 4(%edi)
++  // PD1を指すエントリ
++  movl $pd1, %eax
++  orl  $(PDPTE_PRESENT_BIT | PDPTE_WRITE_BIT | PDPTE_USER_BIT), %eax
++  movl %eax, 2048(%edi)
++  movl $0, 2052(%edi)
++
++  // PD1の第一エントリはPT1を指す
++  movl $pd1, %edi
++  movl $pt1, %eax
++  orl  $(PDE_PRESENT_BIT | PDE_WRITE_BIT | PDE_USER_BIT), %eax
++  movl %eax, (%edi)
++  movl $0, 4(%edi)
++
++  // PT1の第一エントリは物理アドレス0x100000を指す
++  movl $pt1, %edi
++  movl $0x100000, %eax
++  orl  $(PTE_PRESENT_BIT | PTE_WRITE_BIT | PTE_USER_BIT), %eax
++  movl %eax, (%edi)
++  movl $0, 4(%edi)
++
+ 
+   // ページテーブルの構築はここまで
+ 
+@@ -115,6 +151,14 @@ entry:
+   movl %eax, %cr0
+   lgdt gdtr
+   ljmp $KERNEL_CS, $entry64
++
++nocpuid:
++  hlt
++  jmp nocpuid
++
++noia32e:
++  hlt
++  jmp nocpuid
+   
+ .code64
+ entry64:
+@@ -141,7 +185,7 @@ gdt_desc:
+ gdtr:
+   .word 8*4 - 1
+   .quad gdt_desc
+-
++// 初期値を持たないデータ領域
+ .bss
+ .balign 4096  
+ initial_stack_buffer:
+@@ -152,3 +196,9 @@ pml4t:
+ 
+ pdpt1:
+   .skip 4096
++
++pd1:
++  .skip 4096
++
++pt1:
++  .skip 4096
+diff --git a/build_rule.mk b/build_rule.mk
+index 6a83d62..d8afc46 100644
+--- a/build_rule.mk
++++ b/build_rule.mk
+@@ -62,7 +62,7 @@ $(MOUNT_DIR)/core/$(KERNEL): $(MOUNT_DIR)/core/ $(KERNEL)
+ .PHONY: runqemu killqemu
+ 
+ runqemu: image
+-	sudo qemu-system-x86_64 $(QEMU_UEFI_OPTION) -cpu qemu64 -smp 8 -machine q35 -monitor telnet:$(TELNET_ADDR):$(TELNET_PORT),server,nowait -vnc 0.0.0.0:0,password -drive format=raw,file=$(IMAGE) &
++	sudo qemu-system-x86_64 $(QEMU_UEFI_OPTION) -S -gdb tcp::1234 -cpu qemu64 -smp 8 -machine q35 -monitor telnet:$(TELNET_ADDR):$(TELNET_PORT),server,nowait -vnc 0.0.0.0:0,password -drive format=raw,file=$(IMAGE) &
+ 	sleep 0.2s
+ 	echo "set_password vnc a" | netcat $(TELNET_ADDR) $(TELNET_PORT)
+ 

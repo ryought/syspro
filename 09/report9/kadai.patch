@@ -1,0 +1,228 @@
+diff --git a/DEBUG.md b/DEBUG.md
+new file mode 100644
+index 0000000..ba96e2d
+--- /dev/null
++++ b/DEBUG.md
+@@ -0,0 +1,8 @@
++# usage
++
++$ make run
++gdb キック待ち
++
++$ vagrant ssh
++$ gdb -x gdb.scr
++これで実行
+diff --git a/Vagrantfile b/Vagrantfile
+index 75554bd..0b174b6 100644
+--- a/Vagrantfile
++++ b/Vagrantfile
+@@ -7,6 +7,7 @@ Vagrant.configure(2) do |config|
+   config.vm.box_url = "https://cloud-images.ubuntu.com/vagrant/trusty/current/trusty-server-cloudimg-amd64-vagrant-disk1.box"
+   config.vm.provision :shell, :path => "bootstrap.sh", :privileged   => false
+   config.vm.network "forwarded_port", guest: 5900, host: 25900 # for VNC
++  config.vm.network "forwarded_port", guest: 25525, host: 10000 # for gdb
+ 
+   config.vm.provider :virtualbox do |vb|
+     if ENV['VAGRANT_MEMORY']
+diff --git a/boot.S b/boot.S
+index 11aa1b5..ba2f953 100644
+--- a/boot.S
++++ b/boot.S
+@@ -93,6 +93,25 @@ entry:
+   orl  $(PDPTE_PRESENT_BIT | PDPTE_WRITE_BIT | PDPTE_USER_BIT | PDPTE_1GPAGE_BIT), %eax
+   movl %eax, (%edi)
+   movl $0, 4(%edi)
++ 
++  // その続きもストレートマップ
++  movl $(pdpt1+8), %edi
++  movl $0x40000000, %eax
++  orl  $(PDPTE_PRESENT_BIT | PDPTE_WRITE_BIT | PDPTE_USER_BIT | PDPTE_1GPAGE_BIT), %eax
++  movl %eax, (%edi)
++  movl $0, 4(%edi)
++
++  movl $(pdpt1+16), %edi
++  movl $0x80000000, %eax
++  orl  $(PDPTE_PRESENT_BIT | PDPTE_WRITE_BIT | PDPTE_USER_BIT | PDPTE_1GPAGE_BIT), %eax
++  movl %eax, (%edi)
++  movl $0, 4(%edi)
++
++  movl $(pdpt1+24), %edi
++  movl $0xc0000000, %eax
++  orl  $(PDPTE_PRESENT_BIT | PDPTE_WRITE_BIT | PDPTE_USER_BIT | PDPTE_1GPAGE_BIT), %eax
++  movl %eax, (%edi)
++  movl $0, 4(%edi)
+ 
+   // ページテーブルの構築はここまで
+ 
+diff --git a/build_rule.mk b/build_rule.mk
+index 45cbefd..5ddf5aa 100644
+--- a/build_rule.mk
++++ b/build_rule.mk
+@@ -62,7 +62,7 @@ $(MOUNT_DIR)/core/$(KERNEL): $(MOUNT_DIR)/core/ $(KERNEL)
+ .PHONY: runqemu killqemu
+ 
+ runqemu: image
+-	sudo qemu-system-x86_64 $(QEMU_UEFI_OPTION) -cpu qemu64 -smp 8 -machine q35 -monitor telnet:$(TELNET_ADDR):$(TELNET_PORT),server,nowait -vnc 0.0.0.0:0,password -drive format=raw,file=$(IMAGE) &
++	sudo qemu-system-x86_64 $(QEMU_UEFI_OPTION) -cpu qemu64 -smp 8 -machine q35 -monitor telnet:$(TELNET_ADDR):$(TELNET_PORT),server,nowait -vnc 0.0.0.0:0,password -drive format=raw,file=$(IMAGE) -s -S &
+ 	sleep 0.2s
+ 	echo "set_password vnc a" | netcat $(TELNET_ADDR) $(TELNET_PORT)
+ 
+diff --git a/common.h b/common.h
+index 55fbb54..fc86bc6 100644
+--- a/common.h
++++ b/common.h
+@@ -29,4 +29,6 @@ enum ReturnCode {
+   ERROR,
+ };
+ 
++uint8_t font[128][8];
++
+ #define NULL ((void *)0)
+diff --git a/framebuffer.c b/framebuffer.c
+index 94e3984..1a8aead 100644
+--- a/framebuffer.c
++++ b/framebuffer.c
+@@ -17,9 +17,49 @@ void framebuffer_init(struct multiboot_tag_framebuffer_common *tag) {
+   framebuffer_tag = tag;
+ }
+ 
++// 全書き換えをn回する
++int framebuffer_benchmark(int N) {
++  unsigned char *p = (unsigned char*)framebuffer_tag->framebuffer_addr;
++  uint32_t width = framebuffer_tag->framebuffer_width;
++  uint32_t height = framebuffer_tag->framebuffer_height;
++  uint32_t depth = framebuffer_tag->framebuffer_bpp / 8;
++  for(int k=0; k<N; k++) {
++    for(int i=0; i<width*height*depth; i++) {
++      if(k%2 == 1) p[i] = 0xff;
++      else p[i] = 0x00;
++    }
++  }
++  return width*height*depth*N;
++}
++
+ // char文字の描画
+-static void framebuffer_putc(char c) {
++static void framebuffer_putc(unsigned char c) {
+   // TODO
++  unsigned char *p = (unsigned char*)framebuffer_tag->framebuffer_addr;
++  uint32_t width = framebuffer_tag->framebuffer_width;
++  //uint32_t height = framebuffer_tag->framebuffer_height;
++  uint32_t depth = framebuffer_tag->framebuffer_bpp / 8;
++
++  static int x, y;
++
++  for (int i=0; i<8; i++) {
++    for (int j=0; j<8; j++) {
++      int pos = (y+i)*depth*width + (x+j)*depth;
++      for (int b=0; b<depth; b++) {
++        if (font[c][i] >> (7-j) & 1) {
++          p[pos+b] = 0xff;
++        } else {
++          p[pos+b] = 0x00;
++        }
++      }
++    }
++  }
++
++  x += 8;
++  if(x >= width || c == '\n'){
++    x = 0;
++    y += 8;
++  }
+ }
+ 
+ // https://github.com/swetland/xv6 より引用
+diff --git a/framebuffer.h b/framebuffer.h
+index 68991ce..6802a12 100644
+--- a/framebuffer.h
++++ b/framebuffer.h
+@@ -11,3 +11,4 @@
+ 
+ void framebuffer_init(struct multiboot_tag_framebuffer_common *tag);
+ void framebuffer_printf(char *fmt, ...);
++int framebuffer_benchmark(int N);
+diff --git a/gdb.scr b/gdb.scr
+new file mode 100644
+index 0000000..2aece04
+--- /dev/null
++++ b/gdb.scr
+@@ -0,0 +1,6 @@
++set architecture i386:x86-64:intel
++target remote :1234
++source /vagrant/
++symbol-file /vagrant/kernel.elf
++b cmain
++la src
+diff --git a/gdbinit b/gdbinit
+new file mode 100644
+index 0000000..e5ee2a4
+--- /dev/null
++++ b/gdbinit
+@@ -0,0 +1,7 @@
++add-auto-load-safe-path /vagrant/.gdbinit
++set architecture i386:x86-64:intel
++target remote :1234
++source /vagrant/
++symbol-file /vagrant/kernel.elf
++b cmain
++la src
+diff --git a/main.c b/main.c
+index e1f9ecb..7d17ea2 100644
+--- a/main.c
++++ b/main.c
+@@ -12,6 +12,41 @@
+ 
+ uint32_t multiboot_info;
+ 
++uint64_t gettime() {  //usを返す
++  struct hpet_descriptor *d = acpi_get_hpet_desc();
++  uint64_t addr = d->address;
++  *((uint64_t *)(addr + 0x10)) |= 1;
++  uint32_t cpp = *((uint32_t *)(addr + 4));
++  uint64_t mcv = *((uint64_t *)(addr + 0xf0));
++  return cpp * mcv / 1000000 / 1000;
++}
++
++void test_hpet() {
++  uint64_t data[1001];
++  uint64_t sum = 0; 
++  uint64_t varsum = 0;
++  
++  for(int i=0; i<1001; i++){
++    data[i] = gettime(); //usに直す
++  }
++
++  for(int i=1; i<1001; i++){
++    sum += data[i] - data[i-1];
++  }
++  for(int i=1; i<1001; i++){
++    varsum += ((data[i]-data[i-1]) - sum/1000)*((data[i]-data[i-1]) - sum/1000);
++  }
++  framebuffer_printf("ave:%d, var:%d\n", sum/100, varsum/100);
++}
++
++void test_dma() {
++  uint64_t data[2];
++  data[0] = gettime();
++  int x = framebuffer_benchmark(51);
++  data[1] = gettime();
++  framebuffer_printf("dma:%d (%d times)\n", data[1]-data[0]/x, x);
++}
++
+ void cmain() {
+   // TODO check multiboot2 magic number
+ 
+@@ -52,6 +87,12 @@ void cmain() {
+   }
+   
+   // TODO ここにコードを追加
++  test_dma();
++  framebuffer_printf("finished");
++  for(int i=0; i<10; i++){
++    test_hpet();
++  }
++  framebuffer_printf("finished");
+ 
+   while(1) {
+     __asm__ volatile("hlt;");

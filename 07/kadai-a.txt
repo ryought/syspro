@@ -1,0 +1,115 @@
+# カーネルソースを読む
+
+
+getpgidを読む
+
+
+sys.c
+実体 syscall_defineでシステムコールとして登録してる。
+ユーザーがSYSCALL(getpgid)で呼び出すと、これで登録されたプログラムが呼ばれる。
+pid_tは型？
+結局return pid_vnr(task_pgrp(current / task))をやってる
+
+SYSCALL_DEFINE1(getpgid, pid_t, pid)
+{
+ 	struct task_struct *p;
+	struct pid *grp;
+	int retval;
+
+	rcu_read_lock();
+	if (!pid)
+		grp = task_pgrp(current); // currentはプロセス構造体
+	else {
+		retval = -ESRCH;
+		p = find_task_by_vpid(pid);
+		if (!p)
+			goto out;
+		grp = task_pgrp(p);
+		if (!grp)
+			goto out;
+
+		retval = security_task_getpgid(p);
+		if (retval)
+			goto out;
+	}
+	retval = pid_vnr(grp);
+out:
+	rcu_read_unlock();
+	return retval;  // pid_vnr(grp)を返してる
+}
+
+
+
+task_pgrp(task)は、グループリーダーのpidを返す
+sched.h
+static inline struct pid *task_pgrp(struct task_struct *task)
+{
+	return task->group_leader->pids[PIDTYPE_PGID].pid;
+}
+
+task_structは実行中のタスク(プロセスとほとんど同じ意味？)の状態をしまっておく。
+
+
+
+
+pid_vnr(grp)は、pidを受け取って(pid_nr_nsを経由して)upid->nrを返す(upidはpid.numbers[ns->level])
+pid.c
+pid_t pid_vnr(struct pid *pid)
+{
+	return pid_nr_ns(pid, current->nsproxy->pid_ns);
+}
+
+pid_t pid_nr_ns(struct pid *pid, struct pid_namespace *ns)
+{
+	struct upid *upid;
+	pid_t nr = 0;
+
+	if (pid && ns->level <= pid->level) {
+		upid = &pid->numbers[ns->level];
+		if (upid->ns == ns)
+			nr = upid->nr;
+	}
+	return nr;
+}
+
+これでコールの全貌。
+struct upidの意味がわからない。
+
+
+
+
+参考までにSYSCALL_DEFINEマクロの定義について
+
+syscalls.h - SYSCALL_DEFINEのマクロが引数別にある
+
+#define SYSCALL_DEFINE1(name, ...) SYSCALL_DEFINEx(1, _##name, __VA_ARGS__)
+#define SYSCALL_DEFINE2(name, ...) SYSCALL_DEFINEx(2, _##name, __VA_ARGS__)
+#define SYSCALL_DEFINE3(name, ...) SYSCALL_DEFINEx(3, _##name, __VA_ARGS__)
+#define SYSCALL_DEFINE4(name, ...) SYSCALL_DEFINEx(4, _##name, __VA_ARGS__)
+#define SYSCALL_DEFINE5(name, ...) SYSCALL_DEFINEx(5, _##name, __VA_ARGS__)
+#define SYSCALL_DEFINE6(name, ...) SYSCALL_DEFINEx(6, _##name, __VA_ARGS__)
+
+引数xの時のやつは次にある
+
+#ifdef CONFIG_FTRACE_SYSCALLS
+#define SYSCALL_DEFINEx(x, sname, ...)				\
+	static const char *types_##sname[] = {			\
+		__SC_STR_TDECL##x(__VA_ARGS__)			\
+	};							\
+	static const char *args_##sname[] = {			\
+		__SC_STR_ADECL##x(__VA_ARGS__)			\
+	};							\
+	SYSCALL_METADATA(sname, x);				\
+	__SYSCALL_DEFINEx(x, sname, __VA_ARGS__)
+#else
+#define SYSCALL_DEFINEx(x, sname, ...)				\
+	__SYSCALL_DEFINEx(x, sname, __VA_ARGS__)
+#endif
+
+
+よくわかんないけど、引数を展開した後、__SYSCALL_DEFINExがテーブルに登録する感じなんだろうか。 
+
+
+
+
+

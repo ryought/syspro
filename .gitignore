@@ -1,5 +1,6 @@
 # resume .pdfは無視
 resume/
+kernel/
 
 # テストファイルも消す
 01/coreutils-8.9/

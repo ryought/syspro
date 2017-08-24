@@ -1,0 +1,156 @@
+diff --git a/apic.c b/apic.c
+index c6993df..62e377b 100644
+--- a/apic.c
++++ b/apic.c
+@@ -184,3 +184,8 @@ void apic_initialize_ap() {
+   
+   apic_enable_lapic();
+ }
++
++uint32_t get_apic_id() {
++  uint32_t addr = manager.lapic_base_addr + 0x20;
++  return *((uint32_t *)(addr+3));
++}
+diff --git a/apic.h b/apic.h
+index fd25d66..6c0447d 100644
+--- a/apic.h
++++ b/apic.h
+@@ -18,3 +18,4 @@ void apic_send_eoi();
+ void apic_send_ipi(uint8_t destid, int vector);
+ void apic_start_other_processors();
+ void apic_initialize_ap();
++uint32_t get_apic_id();
+diff --git a/common.h b/common.h
+index ed79157..4d36123 100644
+--- a/common.h
++++ b/common.h
+@@ -31,6 +31,8 @@ enum ReturnCode {
+   ERROR,
+ };
+ 
++uint8_t font[128][8];
++
+ #define NULL ((void *)0)
+ 
+ static inline void outb(int pin, uint8_t data) {
+diff --git a/framebuffer.c b/framebuffer.c
+index 2be7263..de79f8e 100644
+--- a/framebuffer.c
++++ b/framebuffer.c
+@@ -21,6 +21,30 @@ void framebuffer_init(struct multiboot_tag_framebuffer_common *tag) {
+ // char文字の描画
+ static void framebuffer_putc(char c) {
+   // TODO
++  unsigned char *p = (unsigned char*)framebuffer_tag->framebuffer_addr;
++  uint32_t width = framebuffer_tag->framebuffer_width;
++  //uint32_t height = framebuffer_tag->framebuffer_height;
++  uint32_t depth = framebuffer_tag->framebuffer_bpp / 8;
++
++  static int x, y;
++
++  for (int i=0; i<8; i++) {
++    for (int j=0; j<8; j++) {
++      int pos = (y+i)*depth*width + (x+j)*depth;
++      for (int b=0; b<depth; b++) {
++        if (font[c][i] >> (7-j) & 1) {
++          p[pos+b] = 0xff;
++        } else {
++          p[pos+b] = 0x00;
++        }
++      }
++    }
++  }
++  x += 8;
++  if(x >= width || c == '\n'){
++    x = 0;
++    y += 8;
++  }
+ }
+ 
+ // https://github.com/swetland/xv6 より引用
+@@ -81,6 +105,8 @@ framebuffer_printint(int xx, int base, int sign)
+     framebuffer_putc(buf[i]);
+ }
+ 
++volatile int lock = 0;
++
+ void
+ framebuffer_printf(char *fmt, ...)
+ {
+@@ -93,6 +119,9 @@ framebuffer_printf(char *fmt, ...)
+   if (fmt == 0)
+     panic();
+ 
++  // https://attractivechaos.wordpress.com/2011/10/06/multi-threaded-programming-efficiency-of-locking/
++  while(__sync_lock_test_and_set(&lock, 1));
++
+   for(i = 0; (c = fmt[i] & 0xff) != 0; i++){
+     if(c != '%'){
+       framebuffer_putc(c);
+@@ -127,4 +156,5 @@ framebuffer_printf(char *fmt, ...)
+       break;
+     }
+   }
++  __sync_lock_release(&lock);
+ }
+diff --git a/main.c b/main.c
+index c388008..c124668 100644
+--- a/main.c
++++ b/main.c
+@@ -13,6 +13,23 @@
+ #include "multiboot2.h"
+ #include "segment.h"
+ 
++void ipi_handler(struct regs *rs) {}
++
++uint64_t gettime() {
++  struct hpet_descriptor *d = acpi_get_hpet_desc();
++  uint64_t addr = d->address;
++  *((uint64_t *)(addr + 0x10)) |= 1;
++  uint32_t cpp = *((uint32_t *)(addr + 4));
++  uint64_t mcv = *((uint64_t *)(addr + 0xf0));
++  return cpp * mcv / 1000000;
++}
++
++void wait(int t) {
++  uint64_t start = gettime();
++  while(gettime() - start < t*1000000000);
++  return;
++}
++
+ void func(struct regs *rs) {
+   __asm__ volatile("cli;hlt;");
+ }
+@@ -47,6 +64,17 @@ void cmain() {
+   apic_start_other_processors();
+ 
+   // TODO ここにコードを追加
++  uint32_t apid = get_apic_id();
++  framebuffer_printf("core%d\n", apid);
++  wait(1);
++  idt_register_callback(32+(int)apid, ipi_handler);
++  apic_send_ipi((uint8_t)apid+1, 32+(int)apid);
++
++  wait(2);
++  framebuffer_printf("hoge");
++  wait(2);
++  framebuffer_printf("hoge");
++
+ 
+   while(1) {
+     __asm__ volatile("hlt;");
+@@ -59,8 +87,14 @@ void cmain_for_ap() {
+   gdt_init();
+ 
+   idt_init_for_each_proc();
++  __asm__ volatile("hlt;");
+ 
+   // TODO ここにコードを追加
++  uint32_t apid = get_apic_id();
++  framebuffer_printf("core%d\n", apid);
++  wait(1);
++  idt_register_callback(32+(int)apid, ipi_handler);
++  apic_send_ipi((uint8_t)apid+1, 32+(int)apid);
+ 
+   while(1) {
+     __asm__ volatile("hlt;");
