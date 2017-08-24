@@ -11,11 +11,13 @@
 int main(int argc, char *argv[]){
   if (argc != 3) {
     // not enough args
+    printf("not enough arguments\n");
     return -1;
   }
   struct timeval start, end;
   int fd0, fd1; 
-  int i, j;
+  int i, j, total;
+  char *p;
   int BUFSIZE = 8192;
   char buf[BUFSIZE];
   
@@ -28,27 +30,29 @@ int main(int argc, char *argv[]){
     return -1;
   }
   
-  fd1 = open(argv[2], O_WRONLY|O_CREAT|O_EXCL, 0666);
+  fd1 = open(argv[2], O_WRONLY|O_CREAT|O_TRUNC, 0666);
   if(fd1 < 0) {
     // error
     perror(argv[2]);
     return -1;
   }
 
-  // TODO 同じファイルにリンクしていることを示す
-    
+  // i:読み込んだバイト数 j:書き込んだバイト数
   while((i=read(fd0, buf, BUFSIZE)) > 0) {
-    j = write(fd1, buf, i);
-    if(j < 0){
-      // 書き込みエラー
-      perror(NULL);
-      return -1;
-    }else if(j < i){
-      // 全部は書き込めてない
-      // TODO ここの処理
-      // memmove(buf+j, buf, i-j);
+    // p:バッファの中で書き込みが終わっていない領域の先頭へのポインタ
+    j = 0;
+    p = buf;
+    while(i - j > 0){
+      j = write(fd1, p, i);
+      //printf("i:%d,j:%d\n", i, j);
+      if(j<0) {
+        perror(NULL);
+        return -1;
+      }
+      p = p + j;
+      i = i - j;
     }
-    //printf("%d, %d\n", i, j);
+    printf("%d, %d\n", i, j);
   }
 
   if(i < 0){
@@ -59,8 +63,8 @@ int main(int argc, char *argv[]){
   close(fd0); close(fd1);
 
   gettimeofday(&end, NULL);
-  printf("%ld %ld\n", start.tv_sec, start.tv_usec);
-  printf("%ld %ld\n", end.tv_sec, end.tv_usec);
+  printf("%ld %d\n", start.tv_sec, start.tv_usec);
+  printf("%ld %d\n", end.tv_sec, end.tv_usec);
   printf("%ld\n", 
     (end.tv_sec-start.tv_sec)*1000000 + (end.tv_usec-start.tv_usec));
 
